@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="topbar">
+  <strong>Painel Administrativo</strong>
+  <div><span>{{ session.get('nome') }}</span> <a class="btn yellow" href="{{ url_for('sair') }}">Sair</a></div>
+</header>
+
+<main class="container">
+  <div class="metrics">
+    <div class="metric"><strong>{{ total_liderancas }}</strong><span>Lideranças</span></div>
+    <div class="metric"><strong>{{ total_pendentes }}</strong><span>Pendentes</span></div>
+    <div class="metric"><strong>{{ total_esp }}</strong><span>Espontâneos</span></div>
+    <div class="metric"><strong>{{ total_trab }}</strong><span>Trabalho</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Filtros gerais</h2>
+    <form method="get" action="{{ url_for('admin') }}" class="grid3">
+      <div>
+        <label>Busca geral</label>
+        <input name="busca" value="{{ busca }}" placeholder="Nome, telefone, colégio ou liderança">
+      </div>
+      <div>
+        <label>Município</label>
+        <input name="municipio" value="{{ municipio }}" placeholder="Ex: Saquarema">
+      </div>
+      <div>
+        <label>Liderança</label>
+        <select name="lideranca_id">
+          <option value="">Todas</option>
+          {% for l in liderancas %}
+          <option value="{{ l.id }}" {% if lideranca_id|string == l.id|string %}selected{% endif %}>{{ l.nome }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="full">
+        <button class="btn" type="submit">Filtrar informações</button>
+        <a class="btn yellow" href="{{ url_for('admin') }}">Limpar filtros</a>
+      </div>
+    </form>
+  </div>
+
+  <h2>Lideranças</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Nome</th><th>Município</th><th>Telefone</th><th>Status</th><th>Espontâneos</th><th>Trabalho</th><th>Ação</th></tr></thead>
+      <tbody>
+        {% for l in liderancas %}
+        <tr>
+          <td>{{ l.nome }}</td>
+          <td>{{ l.municipio }}</td>
+          <td>{{ l.telefone }}</td>
+          <td><span class="status {{ l.status }}">{{ l.status }}</span></td>
+          <td>{{ l.total_espontaneos }}</td>
+          <td>{{ l.total_trabalho }}</td>
+          <td>
+            <a class="linkbtn" href="{{ url_for('admin', lideranca_id=l.id) }}">Ver cadastros</a>
+            {% if l.status != 'ativo' %}
+            <a class="linkbtn green" href="{{ url_for('aprovar', user_id=l.id) }}">Aprovar</a>
+            {% endif %}
+            <a class="linkbtn red" href="{{ url_for('bloquear', user_id=l.id) }}">Bloquear</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7">Nenhuma liderança cadastrada.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="export-row">
+    <h2>Cadastros espontâneos</h2>
+    <a class="btn yellow" href="{{ url_for('exportar', tipo='espontaneos') }}">Exportar CSV</a>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Liderança</th><th>Nome completo</th><th>Município</th><th>Telefone</th><th>Endereço completo</th></tr></thead>
+      <tbody>
+        {% for e in espontaneos %}
+        <tr><td>{{ e.lideranca_nome }}</td><td>{{ e.nome_completo }}</td><td>{{ e.municipio }}</td><td>{{ e.telefone }}</td><td>{{ e.endereco_completo }}</td></tr>
+        {% else %}
+        <tr><td colspan="5">Nenhum cadastro encontrado.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="export-row">
+    <h2>Cadastros de trabalho</h2>
+    <a class="btn yellow" href="{{ url_for('exportar', tipo='trabalho') }}">Exportar CSV</a>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Liderança</th><th>Nome</th><th>Município</th><th>Colégio</th><th>Endereço</th><th>Telefone</th><th>Zona</th><th>Seção</th><th>Número do título</th></tr></thead>
+      <tbody>
+        {% for t in trabalhos %}
+        <tr><td>{{ t.lideranca_nome }}</td><td>{{ t.nome }}</td><td>{{ t.municipio }}</td><td>{{ t.colegio }}</td><td>{{ t.endereco }}</td><td>{{ t.telefone }}</td><td>{{ t.zona }}</td><td>{{ t.secao }}</td><td>{{ t.numero_titulo }}</td></tr>
+        {% else %}
+        <tr><td colspan="9">Nenhum cadastro encontrado.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</main>
+{% endblock %}

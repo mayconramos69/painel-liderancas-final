@@ -1,0 +1,10 @@
+CORREÇÃO FOTO SEGURA - V3
+
+A foto continua no cadastro, mas agora:
+- se a foto vier vazia, o cadastro continua
+- se a extensão for inválida, o cadastro continua
+- se o Render não conseguir salvar a foto, o cadastro continua
+- o erro da foto não derruba mais o sistema
+
+Depois de subir no GitHub:
+Render -> Manual Deploy -> Clear build cache & deploy

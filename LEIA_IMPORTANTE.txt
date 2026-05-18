@@ -1,0 +1,10 @@
+VERSÃO FINAL SEM FOTO
+
+Esta versão remove totalmente o sistema de foto.
+Agora:
+- cadastro funciona sem erro
+- não existe upload de imagem
+- Render fica mais estável
+
+Depois de subir no GitHub:
+Render -> Manual Deploy -> Clear build cache & deploy

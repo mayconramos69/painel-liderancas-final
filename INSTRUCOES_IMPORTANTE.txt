@@ -1,0 +1,11 @@
+VERSÃO CORRIGIDA V2
+
+Esta versão corrige o erro:
+NameError: name 'salvar_foto_lideranca' is not defined
+
+PASSO CORRETO:
+1. Apague/substitua o app.py antigo no GitHub.
+2. Suba TODOS os arquivos desta pasta extraída.
+3. No Render: Manual Deploy -> Clear build cache & deploy.
+
+No GitHub, o app.py precisa aparecer na primeira tela do repositório.
