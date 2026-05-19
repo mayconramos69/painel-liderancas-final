@@ -2,8 +2,7 @@ import os, csv, io
 from datetime import datetime
 from functools import wraps
 
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import psycopg
 from flask import Flask, render_template, request, redirect, url_for, session, flash, Response
 from werkzeug.security import generate_password_hash, check_password_hash
 
