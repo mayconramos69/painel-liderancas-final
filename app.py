@@ -3,6 +3,7 @@ from datetime import datetime
 from functools import wraps
 
 import psycopg
+from psycopg.rows import dict_row
 from flask import Flask, render_template, request, redirect, url_for, session, flash, Response
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -22,8 +23,7 @@ def normalizar(texto):
 def db():
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL não configurada no Render.")
-    return psycopg.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-
+    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
 def init_db():
     conn = db()
