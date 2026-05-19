@@ -1,7 +1,11 @@
-# Painel Lideranças Estável
+# Painel Lideranças PostgreSQL
 
-Build Command: pip install -r requirements.txt
+Agora usa DATABASE_URL do PostgreSQL no Render.
 
-Start Command: gunicorn app:app
+Build Command:
+`pip install -r requirements.txt`
+
+Start Command:
+`gunicorn app:app`
 
 Admin: mayconramos2026 / 26511076mj
