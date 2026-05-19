@@ -22,7 +22,7 @@ def normalizar(texto):
 def db():
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL não configurada no Render.")
-    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    return psycopg.connect(DATABASE_URL, cursor_factory=RealDictCursor)
 
 
 def init_db():
