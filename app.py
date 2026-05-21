@@ -3,6 +3,7 @@ from datetime import datetime
 from functools import wraps
 
 import psycopg
+from psycopg import errors
 from psycopg.rows import dict_row
 from flask import Flask, render_template, request, redirect, url_for, session, flash, Response
 from werkzeug.security import generate_password_hash, check_password_hash
