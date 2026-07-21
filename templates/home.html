@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block body %}
+<main class="landing">
+  <section class="hero">
+    <div class="brand"><span class="logo">AE</span> Área de Estudos</div>
+    <div>
+      <h1>Área Reservada para Estudos e Planejamento</h1>
+      <p>Acesse conteúdos, materiais e planejamentos disponíveis para usuários autorizados.</p>
+      <div class="study-grid">
+        <div>📚<strong>Materiais</strong><small>Conteúdos e orientações</small></div>
+        <div>🗓️<strong>Agenda</strong><small>Datas e comunicados</small></div>
+        <div>📝<strong>Atividades</strong><small>Registros internos</small></div>
+        <div>🔒<strong>Acesso restrito</strong><small>Somente usuários aprovados</small></div>
+      </div>
+    </div>
+    <small class="muted">Ambiente privado • Acesso controlado</small>
+  </section>
+
+  <section class="auth-side">
+    <div class="auth-card">
+      <div class="tabs">
+        <a class="tab {{ 'active' if mode == 'login' }}" href="{{ url_for('home', mode='login') }}">Entrar</a>
+        <a class="tab {{ 'active' if mode == 'register' }}" href="{{ url_for('home', mode='register') }}">Criar acesso</a>
+      </div>
+
+      {% if mode == 'register' %}
+      <form method="post">
+        <input type="hidden" name="action" value="register">
+        <h2>Criar acesso</h2>
+        <p class="muted">Preencha seus dados para solicitar acesso.</p>
+        <label>Nome completo</label><input name="name" required>
+        <label>Nome de usuário</label><input name="username" minlength="4" required>
+        <label>Telefone</label><input name="phone" required>
+        <label>Cidade</label><input name="city" required>
+        <label>Senha</label><input name="password" type="password" minlength="6" required>
+        <button class="btn primary full">Solicitar acesso</button>
+      </form>
+      {% else %}
+      <form method="post">
+        <input type="hidden" name="action" value="login">
+        <h2>Área de Acesso</h2>
+        <p class="muted">Entre com seu usuário e senha.</p>
+        <label>Nome de usuário</label><input name="username" required>
+        <label>Senha</label><input name="password" type="password" required>
+        <button class="btn primary full">Entrar</button>
+      </form>
+      {% endif %}
+    </div>
+  </section>
+</main>
+{% endblock %}

@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block body %}
+<main class="shell">
+  <aside class="sidebar">
+    <div class="brand"><span class="logo">AE</span> Estudos e Planejamento</div>
+    <nav>
+      <a href="#inicio">Dashboard</a>
+      {% if current_user.role == 'leader' %}
+        <a href="#trabalho">Trabalho do Dia</a>
+        <a href="#lideres">Líderes</a>
+      {% endif %}
+      <a href="#cadastros">{{ "Todos os cadastros" if current_user.role == "admin" else "Meus cadastros" }}</a>
+      {% if current_user.role == 'admin' %}<a href="#relatorios">Relatórios em PDF</a><a href="#acessos">Aprovações</a>{% endif %}
+    </nav>
+    <footer>
+      <strong>{{ current_user.name }}</strong>
+      <div class="muted">{{ "Administrador" if current_user.role == "admin" else "Liderança" }}</div>
+      <a class="btn dark full" href="{{ url_for('logout') }}">Sair</a>
+    </footer>
+  </aside>
+
+  <section class="main">
+    <header class="top" id="inicio">
+      <div><h1>Dashboard</h1><div class="muted">Bem-vindo, {{ current_user.name.split()[0] }}.</div></div>
+      <span class="badge">{{ "Controle total" if current_user.role == "admin" else "Acesso aprovado" }}</span>
+    </header>
+
+    <div class="stats">
+      <div class="stat"><small>Trabalho do Dia</small><strong>{{ day_work|length }}</strong></div>
+      <div class="stat"><small>Líderes</small><strong>{{ leaders|length }}</strong></div>
+      <div class="stat"><small>Total</small><strong>{{ day_work|length + leaders|length }}</strong></div>
+      <div class="stat"><small>Valores</small><strong class="money">R$ {{ "%.2f"|format(total)|replace(".", ",") }}</strong></div>
+    </div>
+
+    {% if current_user.role == 'admin' %}
+    <section class="panel" id="relatorios">
+      <h3>Relatórios em PDF</h3>
+      <p class="muted">Escolha os filtros e baixe um arquivo pronto para imprimir. A data já vem preenchida com o dia de hoje. Apague a data para incluir todos os dias.</p>
+      <div class="report-grid">
+        <form action="{{ url_for('report_day_work_pdf') }}" method="get" target="_blank" class="report-card">
+          <h4>Trabalho do Dia</h4>
+          <label>Data</label><input type="date" name="date" value="{{ current_date }}">
+          <label>Responsável</label>
+          <select name="owner_id">
+            <option value="">Todos</option>
+            {% for user in users %}<option value="{{ user.id }}">{{ user.name }}</option>{% endfor %}
+          </select>
+          <label>Cidade</label><input name="city" placeholder="Todas as cidades">
+          <button class="btn primary full" type="submit">Baixar PDF do Trabalho do Dia</button>
+        </form>
+        <form action="{{ url_for('report_leaders_pdf') }}" method="get" target="_blank" class="report-card">
+          <h4>Líderes</h4>
+          <label>Data</label><input type="date" name="date" value="{{ current_date }}">
+          <label>Responsável</label>
+          <select name="owner_id">
+            <option value="">Todos</option>
+            {% for user in users %}<option value="{{ user.id }}">{{ user.name }}</option>{% endfor %}
+          </select>
+          <label>Cidade</label><input name="city" placeholder="Todas as cidades">
+          <button class="btn primary full" type="submit">Baixar PDF de Líderes</button>
+        </form>
+      </div>
+    </section>
+    {% endif %}
+
+    {% if current_user.role == 'leader' %}
+    <section class="panel" id="trabalho">
+      <h3>Novo cadastro do Trabalho do Dia</h3>
+      <form action="{{ url_for('create_day_work') }}" method="post" enctype="multipart/form-data" class="grid">
+        <div class="full"><label>Foto do rosto</label><input name="photo" type="file" accept="image/*" capture="user"></div>
+        <div><label>Nome completo</label><input name="name" required></div>
+        <div><label>Título de eleitor</label><input name="voter_title" required></div>
+        <div><label>Colégio</label><input name="school" required></div>
+        <div><label>Zona</label><input name="zone" required></div>
+        <div><label>Seção</label><input name="section" required></div>
+        <div><label>Cidade</label><input name="city" required></div>
+        <div><label>Valor</label><input name="amount" type="number" min="0.01" step="0.01" required></div>
+        <div class="full"><label>Observações</label><textarea name="notes"></textarea></div>
+        <button class="btn primary full">Salvar cadastro</button>
+      </form>
+    </section>
+
+    <section class="panel" id="lideres">
+      <h3>Cadastrar Líder</h3>
+      <form action="{{ url_for('create_leader_record') }}" method="post" class="grid">
+        <div><label>Nome completo</label><input name="name" required></div>
+        <div><label>Telefone</label><input name="phone" required></div>
+        <div><label>Cidade</label><input name="city" required></div>
+        <div><label>Bairro</label><input name="district" required></div>
+        <div class="full"><label>Endereço</label><input name="address" required></div>
+        <div><label>Valor</label><input name="amount" type="number" min="0.01" step="0.01" required></div>
+        <div class="full"><label>Observações</label><textarea name="notes"></textarea></div>
+        <button class="btn primary full">Salvar Líder</button>
+      </form>
+    </section>
+    {% endif %}
+
+    <section class="panel" id="cadastros">
+      <h3>{{ "Todos os cadastros do Trabalho do Dia" if current_user.role == "admin" else "Meus cadastros" }}</h3>
+      <div class="table"><table>
+        <thead><tr><th>Foto</th><th>Nome</th><th>Responsável</th><th>Colégio</th><th>Zona/Seção</th><th>Cidade</th><th>Valor</th>{% if current_user.role == 'admin' %}<th>Controle</th>{% endif %}</tr></thead>
+        <tbody>
+        {% for x in day_work %}
+          <tr>
+            <td>{% if x.photo %}<img class="avatar" src="{{ url_for('photo', record_id=x.id) }}">{% else %}Sem foto{% endif %}</td>
+            <td>{{ x.name }}</td><td>{{ x.owner.name }}</td><td>{{ x.school }}</td><td>{{ x.zone }}/{{ x.section }}</td><td>{{ x.city }}</td><td>R$ {{ "%.2f"|format(x.amount)|replace(".", ",") }}</td>
+            {% if current_user.role == 'admin' %}
+            <td><details><summary>Editar tudo</summary>
+              <form action="{{ url_for('update_day_work', record_id=x.id) }}" method="post" enctype="multipart/form-data" class="grid compact">
+                <div class="full"><label>Trocar foto</label><input name="photo" type="file" accept="image/*"></div>
+                <div><label>Nome</label><input name="name" value="{{ x.name }}"></div>
+                <div><label>Título</label><input name="voter_title" value="{{ x.voter_title }}"></div>
+                <div><label>Colégio</label><input name="school" value="{{ x.school }}"></div>
+                <div><label>Zona</label><input name="zone" value="{{ x.zone }}"></div>
+                <div><label>Seção</label><input name="section" value="{{ x.section }}"></div>
+                <div><label>Cidade</label><input name="city" value="{{ x.city }}"></div>
+                <div><label>Valor</label><input name="amount" value="{{ x.amount }}"></div>
+                <div class="full"><label>Observações</label><textarea name="notes">{{ x.notes or '' }}</textarea></div>
+                <button class="btn primary">Salvar</button>
+              </form>
+              <form action="{{ url_for('delete_day_work', record_id=x.id) }}" method="post"><button class="btn danger">Excluir</button></form>
+            </details></td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+
+    <section class="panel" id="lideres-lista">
+      <h3>{{ "Todos os Líderes" if current_user.role == "admin" else "Meus Líderes" }}</h3>
+      <div class="table"><table>
+        <thead><tr><th>Nome</th><th>Responsável</th><th>Telefone</th><th>Cidade</th><th>Bairro</th><th>Valor</th>{% if current_user.role == 'admin' %}<th>Controle</th>{% endif %}</tr></thead>
+        <tbody>
+        {% for x in leaders %}
+          <tr>
+            <td>{{ x.name }}</td><td>{{ x.owner.name }}</td><td>{{ x.phone }}</td><td>{{ x.city }}</td><td>{{ x.district }}</td><td>R$ {{ "%.2f"|format(x.amount)|replace(".", ",") }}</td>
+            {% if current_user.role == 'admin' %}
+            <td><details><summary>Editar tudo</summary>
+              <form action="{{ url_for('update_leader', record_id=x.id) }}" method="post" class="grid compact">
+                <div><label>Nome</label><input name="name" value="{{ x.name }}"></div>
+                <div><label>Telefone</label><input name="phone" value="{{ x.phone }}"></div>
+                <div><label>Cidade</label><input name="city" value="{{ x.city }}"></div>
+                <div><label>Bairro</label><input name="district" value="{{ x.district }}"></div>
+                <div class="full"><label>Endereço</label><input name="address" value="{{ x.address }}"></div>
+                <div><label>Valor</label><input name="amount" value="{{ x.amount }}"></div>
+                <div class="full"><label>Observações</label><textarea name="notes">{{ x.notes or '' }}</textarea></div>
+                <button class="btn primary">Salvar</button>
+              </form>
+              <form action="{{ url_for('delete_leader', record_id=x.id) }}" method="post"><button class="btn danger">Excluir</button></form>
+            </details></td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+
+    {% if current_user.role == 'admin' %}
+    <section class="panel" id="acessos">
+      <h3>Aprovações e acessos</h3>
+      <div class="table"><table>
+        <thead><tr><th>Nome</th><th>Usuário</th><th>Telefone</th><th>Cidade</th><th>Status</th><th>Controle</th></tr></thead>
+        <tbody>
+        {% for x in users %}
+          <tr><td>{{ x.name }}</td><td>{{ x.username }}</td><td>{{ x.phone }}</td><td>{{ x.city }}</td><td>{{ x.status }}</td>
+          <td><details><summary>Editar acesso</summary>
+            <form action="{{ url_for('update_access', user_id=x.id) }}" method="post" class="grid compact">
+              <div><label>Nome</label><input name="name" value="{{ x.name }}"></div>
+              <div><label>Usuário</label><input name="username" value="{{ x.username }}"></div>
+              <div><label>Telefone</label><input name="phone" value="{{ x.phone }}"></div>
+              <div><label>Cidade</label><input name="city" value="{{ x.city }}"></div>
+              <div><label>Nova senha</label><input name="password" type="password"></div>
+              <div><label>Status</label><select name="status"><option value="pending" {{ 'selected' if x.status=='pending' }}>Pendente</option><option value="approved" {{ 'selected' if x.status=='approved' }}>Aprovado</option><option value="blocked" {{ 'selected' if x.status=='blocked' }}>Bloqueado</option></select></div>
+              <button class="btn primary">Salvar acesso</button>
+            </form>
+            <form action="{{ url_for('delete_access', user_id=x.id) }}" method="post"><button class="btn danger">Excluir ou bloquear</button></form>
+          </details></td></tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}

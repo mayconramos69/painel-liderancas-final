@@ -1,649 +1,598 @@
-import os, csv, io
-from datetime import datetime
+import os
+import re
+from decimal import Decimal, InvalidOperation
+from datetime import datetime, date
 from functools import wraps
 
-import psycopg
-from psycopg import errors
-from psycopg.rows import dict_row
-from flask import Flask, render_template, request, redirect, url_for, session, flash, Response
+from flask import (
+    Flask, render_template, request, redirect, url_for,
+    flash, send_file, abort
+)
+from flask_login import (
+    LoginManager, UserMixin, login_user, logout_user,
+    login_required, current_user
+)
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import or_, func
 from werkzeug.security import generate_password_hash, check_password_hash
+from io import BytesIO
+
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "chave-temporaria")
+app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "troque-esta-chave")
+database_url = os.getenv("DATABASE_URL", "")
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
+app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["MAX_CONTENT_LENGTH"] = 6 * 1024 * 1024
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
-
-ADMIN_USER = "mayconramos2026"
-ADMIN_PASS = "26511076mj"
-
-
-def normalizar(texto):
-    return " ".join((texto or "").strip().lower().split())
+db = SQLAlchemy(app)
+login_manager = LoginManager(app)
+login_manager.login_view = "home"
 
 
-def db():
-    if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL não configurada no Render.")
-    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+def normalize_username(value: str) -> str:
+    return re.sub(r"[^a-z0-9._-]", "", (value or "").lower().strip())
 
-def init_db():
-    conn = db()
-    cur = conn.cursor()
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS usuarios (
-        id SERIAL PRIMARY KEY,
-        nome TEXT NOT NULL,
-        usuario TEXT UNIQUE NOT NULL,
-        senha_hash TEXT NOT NULL,
-        telefone TEXT,
-        email TEXT,
-        municipio TEXT,
-        bairro TEXT,
-        zona_regiao TEXT,
-        perfil TEXT NOT NULL DEFAULT 'lideranca',
-        status TEXT NOT NULL DEFAULT 'pendente',
-        pode_trabalho INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL
-    )
-    """)
+def normalize_phone(value: str) -> str:
+    return re.sub(r"\D", "", value or "")
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS espontaneos (
-        id SERIAL PRIMARY KEY,
-        lideranca_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
-        nome_completo TEXT NOT NULL,
-        municipio TEXT NOT NULL,
-        telefone TEXT,
-        endereco_completo TEXT,
-        nome_normalizado TEXT,
-        telefone_normalizado TEXT,
-        created_at TEXT NOT NULL
-    )
-    """)
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS trabalho (
-        id SERIAL PRIMARY KEY,
-        lideranca_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
-        nome TEXT NOT NULL,
-        municipio TEXT NOT NULL,
-        colegio TEXT,
-        endereco TEXT,
-        telefone TEXT,
-        zona TEXT,
-        secao TEXT,
-        numero_titulo TEXT,
-        nome_normalizado TEXT,
-        telefone_normalizado TEXT,
-        titulo_normalizado TEXT,
-        created_at TEXT NOT NULL
-    )
-    """)
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(160), nullable=False)
+    username = db.Column(db.String(80), unique=True, nullable=False, index=True)
+    phone = db.Column(db.String(30), unique=True, nullable=False)
+    city = db.Column(db.String(120), nullable=False)
+    password_hash = db.Column(db.String(255), nullable=False)
+    role = db.Column(db.String(20), nullable=False, default="leader")
+    status = db.Column(db.String(20), nullable=False, default="pending")
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
 
-    cur.execute("SELECT id FROM usuarios WHERE usuario=%s", (ADMIN_USER,))
-    admin = cur.fetchone()
 
-    if not admin:
-        cur.execute("""
-            INSERT INTO usuarios
-            (nome, usuario, senha_hash, telefone, email, municipio, bairro, zona_regiao, perfil, status, pode_trabalho, created_at)
-            VALUES (%s, %s, %s, '', '', '', '', '', 'admin', 'ativo', 1, %s)
-        """, ("Administrador", ADMIN_USER, generate_password_hash(ADMIN_PASS), datetime.now().isoformat()))
+class DayWork(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    owner = db.relationship("User", backref="day_work_records")
+    name = db.Column(db.String(160), nullable=False)
+    voter_title = db.Column(db.String(80), nullable=False)
+    school = db.Column(db.String(180), nullable=False)
+    zone = db.Column(db.String(40), nullable=False)
+    section = db.Column(db.String(40), nullable=False)
+    city = db.Column(db.String(120), nullable=False)
+    amount = db.Column(db.Numeric(12, 2), nullable=False)
+    notes = db.Column(db.Text)
+    photo = db.Column(db.LargeBinary)
+    photo_type = db.Column(db.String(80))
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+
+
+class LeaderRecord(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    owner = db.relationship("User", backref="leader_records")
+    name = db.Column(db.String(160), nullable=False)
+    phone = db.Column(db.String(30), nullable=False)
+    city = db.Column(db.String(120), nullable=False)
+    district = db.Column(db.String(120), nullable=False)
+    address = db.Column(db.String(220), nullable=False)
+    amount = db.Column(db.Numeric(12, 2), nullable=False)
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+
+
+class AuditLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    admin_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    entity = db.Column(db.String(50), nullable=False)
+    record_id = db.Column(db.String(50), nullable=False)
+    action = db.Column(db.String(50), nullable=False)
+    details = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    return db.session.get(User, int(user_id))
+
+
+def admin_required(view):
+    @wraps(view)
+    @login_required
+    def wrapped(*args, **kwargs):
+        if current_user.role != "admin":
+            abort(403)
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def create_admin():
+    username = normalize_username(os.getenv("ADMIN_USERNAME", "mayconramos2026"))
+    user = User.query.filter_by(username=username).first()
+    password = os.getenv("ADMIN_PASSWORD", "265110")
+    if not user:
+        user = User(
+            name=os.getenv("ADMIN_NAME", "Maycon Ramos"),
+            username=username,
+            phone=normalize_phone(os.getenv("ADMIN_PHONE", "22999999999")),
+            city=os.getenv("ADMIN_CITY", "Saquarema"),
+            password_hash=generate_password_hash(password),
+            role="admin",
+            status="approved",
+        )
+        db.session.add(user)
     else:
-        cur.execute("UPDATE usuarios SET pode_trabalho=1, status='ativo', perfil='admin' WHERE usuario=%s", (ADMIN_USER,))
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-
-def login_required(f):
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        if "user_id" not in session:
-            return redirect(url_for("index"))
-        return f(*args, **kwargs)
-    return wrapper
+        user.role = "admin"
+        user.status = "approved"
+        user.password_hash = generate_password_hash(password)
+    db.session.commit()
 
 
-def admin_required(f):
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        if session.get("perfil") != "admin":
-            return redirect(url_for("index"))
-        return f(*args, **kwargs)
-    return wrapper
+def audit(entity, record_id, action, details=""):
+    db.session.add(AuditLog(
+        admin_id=current_user.id if current_user.is_authenticated else None,
+        entity=entity,
+        record_id=str(record_id),
+        action=action,
+        details=details,
+    ))
+    db.session.commit()
 
 
-def lideranca_required(f):
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        if session.get("perfil") != "lideranca":
-            return redirect(url_for("index"))
-        return f(*args, **kwargs)
-    return wrapper
+with app.app_context():
+    db.create_all()
+    create_admin()
 
 
-@app.route("/")
-def index():
-    if session.get("perfil") == "admin":
-        return redirect(url_for("admin"))
-    if session.get("perfil") == "lideranca":
-        return redirect(url_for("lideranca"))
-    return render_template("index.html")
+@app.route("/", methods=["GET", "POST"])
+def home():
+    if current_user.is_authenticated:
+        return redirect(url_for("dashboard"))
+
+    mode = request.args.get("mode", "login")
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "login":
+            username = normalize_username(request.form.get("username"))
+            password = request.form.get("password", "")
+            user = User.query.filter_by(username=username).first()
+            if not user or not check_password_hash(user.password_hash, password):
+                flash("Usuário ou senha incorretos.", "error")
+            elif user.status == "pending":
+                flash("Seu acesso ainda está aguardando aprovação.", "info")
+            elif user.status == "blocked":
+                flash("Este acesso está bloqueado.", "error")
+            else:
+                login_user(user, remember=True)
+                return redirect(url_for("dashboard"))
+            mode = "login"
+
+        elif action == "register":
+            name = request.form.get("name", "").strip()
+            username = normalize_username(request.form.get("username"))
+            phone = normalize_phone(request.form.get("phone"))
+            city = request.form.get("city", "").strip()
+            password = request.form.get("password", "")
+
+            if not name or len(username) < 4 or len(phone) < 10 or not city or len(password) < 6:
+                flash("Revise os dados. Usuário mínimo 4 caracteres e senha mínimo 6.", "error")
+            elif User.query.filter(or_(User.username == username, User.phone == phone)).first():
+                flash("Usuário ou telefone já cadastrado.", "error")
+            else:
+                db.session.add(User(
+                    name=name,
+                    username=username,
+                    phone=phone,
+                    city=city,
+                    password_hash=generate_password_hash(password),
+                    role="leader",
+                    status="pending",
+                ))
+                db.session.commit()
+                flash("Cadastro enviado. Aguarde a aprovação do administrador.", "success")
+                return redirect(url_for("home", mode="login"))
+            mode = "register"
+
+    return render_template("home.html", mode=mode)
 
 
-@app.route("/cadastro", methods=["POST"])
-def cadastro():
-    nome = request.form.get("nome", "").strip()
-    usuario = request.form.get("usuario", "").strip().lower()
-    senha = request.form.get("senha", "").strip()
-    telefone = request.form.get("telefone", "").strip()
-    email = request.form.get("email", "").strip()
-    municipio = request.form.get("municipio", "").strip()
-    bairro = request.form.get("bairro", "").strip()
-    zona_regiao = request.form.get("zona_regiao", "").strip()
-
-    if not nome or not usuario or not senha:
-        flash("Preencha nome, usuário e senha.")
-        return redirect(url_for("index"))
-
-    conn = db()
-    cur = conn.cursor()
-    try:
-        cur.execute("""
-            INSERT INTO usuarios
-            (nome, usuario, senha_hash, telefone, email, municipio, bairro, zona_regiao, perfil, status, pode_trabalho, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'lideranca', 'pendente', 0, %s)
-        """, (nome, usuario, generate_password_hash(senha), telefone, email, municipio, bairro, zona_regiao, datetime.now().isoformat()))
-        conn.commit()
-        flash("Cadastro enviado. Aguarde aprovação do administrador.")
-    except psycopg2.errors.UniqueViolation:
-        conn.rollback()
-        flash("Esse usuário já existe.")
-    finally:
-        cur.close()
-        conn.close()
-
-    return redirect(url_for("index"))
-
-
-@app.route("/login", methods=["POST"])
-def login():
-    usuario = request.form.get("usuario", "").strip().lower()
-    senha = request.form.get("senha", "").strip()
-
-    conn = db()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM usuarios WHERE usuario=%s", (usuario,))
-    user = cur.fetchone()
-    cur.close()
-    conn.close()
-
-    if not user or not check_password_hash(user["senha_hash"], senha):
-        flash("Usuário ou senha inválidos.")
-        return redirect(url_for("index"))
-
-    if user["status"] != "ativo":
-        flash("Seu acesso ainda não foi aprovado ou está bloqueado.")
-        return redirect(url_for("index"))
-
-    session["user_id"] = user["id"]
-    session["nome"] = user["nome"]
-    session["perfil"] = user["perfil"]
-
-    return redirect(url_for("admin" if user["perfil"] == "admin" else "lideranca"))
-
-
-@app.route("/sair")
-def sair():
-    session.clear()
-    return redirect(url_for("index"))
-
-
-@app.route("/lideranca")
+@app.route("/logout")
 @login_required
-@lideranca_required
-def lideranca():
-    lid = session["user_id"]
-    conn = db()
-    cur = conn.cursor()
-
-    cur.execute("SELECT * FROM usuarios WHERE id=%s", (lid,))
-    user = cur.fetchone()
-
-    cur.execute("SELECT * FROM espontaneos WHERE lideranca_id=%s ORDER BY id DESC", (lid,))
-    esp = cur.fetchall()
-
-    cur.execute("SELECT * FROM trabalho WHERE lideranca_id=%s ORDER BY id DESC", (lid,))
-    trab = cur.fetchall()
-
-    cur.close()
-    conn.close()
-
-    return render_template("lideranca.html", user=user, espontaneos=esp, trabalhos=trab)
+def logout():
+    logout_user()
+    return redirect(url_for("home"))
 
 
-@app.route("/espontaneo/novo", methods=["POST"])
+@app.route("/dashboard")
 @login_required
-@lideranca_required
-def novo_espontaneo():
-    nome = request.form.get("nome_completo", "").strip()
-    municipio = request.form.get("municipio", "").strip()
-    telefone = request.form.get("telefone", "").strip()
-    endereco = request.form.get("endereco_completo", "").strip()
+def dashboard():
+    if current_user.status != "approved":
+        logout_user()
+        return redirect(url_for("home"))
 
-    nn = normalizar(nome)
-    tn = normalizar(telefone)
+    if current_user.role == "admin":
+        day_work = DayWork.query.order_by(DayWork.created_at.desc()).all()
+        leaders = LeaderRecord.query.order_by(LeaderRecord.created_at.desc()).all()
+        users = User.query.filter_by(role="leader").order_by(User.created_at.desc()).all()
+    else:
+        day_work = DayWork.query.filter_by(owner_id=current_user.id).order_by(DayWork.created_at.desc()).all()
+        leaders = LeaderRecord.query.filter_by(owner_id=current_user.id).order_by(LeaderRecord.created_at.desc()).all()
+        users = []
 
-    conn = db()
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT u.nome AS lideranca_nome
-        FROM espontaneos e
-        JOIN usuarios u ON u.id=e.lideranca_id
-        WHERE
-            (e.telefone_normalizado != '' AND e.telefone_normalizado=%s)
-            OR
-            (e.nome_normalizado=%s AND LOWER(TRIM(e.municipio))=LOWER(TRIM(%s)))
-        LIMIT 1
-    """, (tn, nn, municipio))
-
-    dup = cur.fetchone()
-
-    if dup:
-        cur.close()
-        conn.close()
-        flash(f"Cadastro bloqueado: já consta vinculado à liderança {dup['lideranca_nome']}.")
-        return redirect(url_for("lideranca"))
-
-    cur.execute("""
-        INSERT INTO espontaneos
-        (lideranca_id, nome_completo, municipio, telefone, endereco_completo, nome_normalizado, telefone_normalizado, created_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-    """, (session["user_id"], nome, municipio, telefone, endereco, nn, tn, datetime.now().isoformat()))
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    flash("Cadastro espontâneo salvo.")
-    return redirect(url_for("lideranca"))
-
-
-@app.route("/trabalho/novo", methods=["POST"])
-@login_required
-@lideranca_required
-def novo_trabalho():
-    conn = db()
-    cur = conn.cursor()
-
-    cur.execute("SELECT pode_trabalho FROM usuarios WHERE id=%s", (session["user_id"],))
-    user = cur.fetchone()
-
-    if not user or int(user["pode_trabalho"] or 0) != 1:
-        cur.close()
-        conn.close()
-        flash("Você ainda não tem autorização para cadastrar em Trabalho.")
-        return redirect(url_for("lideranca"))
-
-    nome = request.form.get("nome", "").strip()
-    municipio = request.form.get("municipio", "").strip()
-    colegio = request.form.get("colegio", "").strip()
-    endereco = request.form.get("endereco", "").strip()
-    telefone = request.form.get("telefone", "").strip()
-    zona = request.form.get("zona", "").strip()
-    secao = request.form.get("secao", "").strip()
-    titulo = request.form.get("numero_titulo", "").strip()
-
-    nn = normalizar(nome)
-    tn = normalizar(telefone)
-    titn = normalizar(titulo)
-
-    cur.execute("""
-        SELECT u.nome AS lideranca_nome
-        FROM trabalho t
-        JOIN usuarios u ON u.id=t.lideranca_id
-        WHERE
-            (t.titulo_normalizado != '' AND t.titulo_normalizado=%s)
-            OR
-            (t.telefone_normalizado != '' AND t.telefone_normalizado=%s)
-            OR
-            (t.nome_normalizado=%s AND LOWER(TRIM(t.municipio))=LOWER(TRIM(%s)))
-        LIMIT 1
-    """, (titn, tn, nn, municipio))
-
-    dup = cur.fetchone()
-
-    if dup:
-        cur.close()
-        conn.close()
-        flash(f"Cadastro bloqueado: já consta vinculado à liderança {dup['lideranca_nome']}.")
-        return redirect(url_for("lideranca"))
-
-    cur.execute("""
-        INSERT INTO trabalho
-        (lideranca_id, nome, municipio, colegio, endereco, telefone, zona, secao, numero_titulo,
-         nome_normalizado, telefone_normalizado, titulo_normalizado, created_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """, (session["user_id"], nome, municipio, colegio, endereco, telefone, zona, secao, titulo, nn, tn, titn, datetime.now().isoformat()))
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    flash("Cadastro de trabalho salvo.")
-    return redirect(url_for("lideranca"))
-
-
-@app.route("/admin")
-@login_required
-@admin_required
-def admin():
-    busca = request.args.get("busca", "").strip()
-    municipio = request.args.get("municipio", "").strip()
-    lideranca_id = request.args.get("lideranca_id", "").strip()
-
-    conn = db()
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT u.*,
-            (SELECT COUNT(*) FROM espontaneos e WHERE e.lideranca_id=u.id) AS total_espontaneos,
-            (SELECT COUNT(*) FROM trabalho t WHERE t.lideranca_id=u.id) AS total_trabalho,
-            ((SELECT COUNT(*) FROM espontaneos e WHERE e.lideranca_id=u.id) + (SELECT COUNT(*) FROM trabalho t WHERE t.lideranca_id=u.id)) AS total_geral
-        FROM usuarios u
-        WHERE u.perfil='lideranca'
-        ORDER BY u.status DESC, total_geral DESC, u.nome ASC
-    """)
-    liderancas = cur.fetchall()
-
-    cur.execute("""
-        SELECT u.id, u.nome, u.municipio, u.status, u.pode_trabalho,
-            COUNT(DISTINCT e.id) AS total_espontaneos,
-            COUNT(DISTINCT t.id) AS total_trabalho,
-            (COUNT(DISTINCT e.id) + COUNT(DISTINCT t.id)) AS total_geral
-        FROM usuarios u
-        LEFT JOIN espontaneos e ON e.lideranca_id=u.id
-        LEFT JOIN trabalho t ON t.lideranca_id=u.id
-        WHERE u.perfil='lideranca'
-        GROUP BY u.id
-        ORDER BY total_geral DESC, total_trabalho DESC, total_espontaneos DESC, u.nome ASC
-        LIMIT 20
-    """)
-    ranking = cur.fetchall()
-
-    cur.execute("SELECT COUNT(*) AS c FROM usuarios WHERE perfil='lideranca'")
-    total_liderancas = cur.fetchone()["c"]
-
-    cur.execute("SELECT COUNT(*) AS c FROM usuarios WHERE perfil='lideranca' AND status='pendente'")
-    total_pendentes = cur.fetchone()["c"]
-
-    cur.execute("SELECT COUNT(*) AS c FROM espontaneos")
-    total_esp = cur.fetchone()["c"]
-
-    cur.execute("SELECT COUNT(*) AS c FROM trabalho")
-    total_trab = cur.fetchone()["c"]
-
-    where_e, params_e = [], []
-    where_t, params_t = [], []
-
-    if busca:
-        where_e.append("(e.nome_completo ILIKE %s OR e.telefone ILIKE %s OR u.nome ILIKE %s)")
-        params_e += [f"%{busca}%", f"%{busca}%", f"%{busca}%"]
-
-        where_t.append("(t.nome ILIKE %s OR t.telefone ILIKE %s OR t.colegio ILIKE %s OR u.nome ILIKE %s)")
-        params_t += [f"%{busca}%", f"%{busca}%", f"%{busca}%", f"%{busca}%"]
-
-    if municipio:
-        where_e.append("e.municipio ILIKE %s")
-        params_e.append(f"%{municipio}%")
-
-        where_t.append("t.municipio ILIKE %s")
-        params_t.append(f"%{municipio}%")
-
-    if lideranca_id:
-        where_e.append("e.lideranca_id=%s")
-        params_e.append(lideranca_id)
-
-        where_t.append("t.lideranca_id=%s")
-        params_t.append(lideranca_id)
-
-    sql_e = """
-        SELECT e.*, u.nome AS lideranca_nome
-        FROM espontaneos e
-        JOIN usuarios u ON u.id=e.lideranca_id
-    """
-    if where_e:
-        sql_e += " WHERE " + " AND ".join(where_e)
-    sql_e += " ORDER BY e.id DESC"
-
-    cur.execute(sql_e, params_e)
-    esp = cur.fetchall()
-
-    sql_t = """
-        SELECT t.*, u.nome AS lideranca_nome
-        FROM trabalho t
-        JOIN usuarios u ON u.id=t.lideranca_id
-    """
-    if where_t:
-        sql_t += " WHERE " + " AND ".join(where_t)
-    sql_t += " ORDER BY t.id DESC"
-
-    cur.execute(sql_t, params_t)
-    trab = cur.fetchall()
-
-    cur.close()
-    conn.close()
-
+    total = sum((x.amount or Decimal("0")) for x in day_work + leaders)
     return render_template(
-        "admin.html",
-        liderancas=liderancas,
-        ranking=ranking,
-        espontaneos=esp,
-        trabalhos=trab,
-        total_liderancas=total_liderancas,
-        total_pendentes=total_pendentes,
-        total_esp=total_esp,
-        total_trab=total_trab,
-        busca=busca,
-        municipio=municipio,
-        lideranca_id=lideranca_id
+        "dashboard.html",
+        day_work=day_work,
+        leaders=leaders,
+        users=users,
+        total=total,
+        current_date=date.today().isoformat(),
     )
 
 
-@app.route("/admin/aprovar/<int:user_id>")
-@login_required
-@admin_required
-def aprovar(user_id):
-    conn = db()
-    cur = conn.cursor()
-    cur.execute("UPDATE usuarios SET status='ativo' WHERE id=%s AND perfil='lideranca'", (user_id,))
-    conn.commit()
-    cur.close()
-    conn.close()
-    flash("Liderança aprovada.")
-    return redirect(url_for("admin"))
+def _parse_report_date(value):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        return None
 
 
-@app.route("/admin/bloquear/<int:user_id>")
-@login_required
-@admin_required
-def bloquear(user_id):
-    conn = db()
-    cur = conn.cursor()
-    cur.execute("UPDATE usuarios SET status='bloqueado' WHERE id=%s AND perfil='lideranca'", (user_id,))
-    conn.commit()
-    cur.close()
-    conn.close()
-    flash("Liderança bloqueada.")
-    return redirect(url_for("admin"))
+def _money(value):
+    amount = Decimal(value or 0)
+    formatted = f"{amount:,.2f}"
+    return "R$ " + formatted.replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-@app.route("/admin/apagar_lideranca/<int:user_id>")
-@login_required
-@admin_required
-def apagar_lideranca(user_id):
-    conn = db()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM usuarios WHERE id=%s AND perfil='lideranca'", (user_id,))
-    conn.commit()
-    cur.close()
-    conn.close()
-    flash("Liderança apagada com todos os cadastros vinculados.")
-    return redirect(url_for("admin"))
+def _pdf_response(title, subtitle, headers, rows, total_value, filename, column_widths):
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        rightMargin=10 * mm,
+        leftMargin=10 * mm,
+        topMargin=10 * mm,
+        bottomMargin=12 * mm,
+        title=title,
+        author="Sistema Área de Estudos",
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "ReportTitle",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=17,
+        leading=21,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#111111"),
+        spaceAfter=5,
+    )
+    subtitle_style = ParagraphStyle(
+        "ReportSubtitle",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=8.5,
+        leading=11,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#444444"),
+        spaceAfter=7,
+    )
+    cell_style = ParagraphStyle(
+        "Cell", parent=styles["Normal"], fontName="Helvetica", fontSize=6.7, leading=8, alignment=TA_LEFT
+    )
+    head_style = ParagraphStyle(
+        "Head", parent=cell_style, fontName="Helvetica-Bold", textColor=colors.white
+    )
+    story = [
+        Paragraph("ÁREA DE ESTUDOS", title_style),
+        Paragraph(title, title_style),
+        Paragraph(subtitle, subtitle_style),
+        Spacer(1, 3 * mm),
+    ]
+    table_data = [[Paragraph(str(h), head_style) for h in headers]]
+    for row in rows:
+        table_data.append([Paragraph(str(value or "-"), cell_style) for value in row])
+    if not rows:
+        table_data.append([Paragraph("Nenhum cadastro encontrado para os filtros escolhidos.", cell_style)] + [""] * (len(headers) - 1))
+
+    table = Table(table_data, colWidths=column_widths, repeatRows=1, hAlign="LEFT")
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#191919")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#aaaaaa")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f3f3f3")]),
+        ("SPAN", (0, 1 if not rows else -1), (-1, 1 if not rows else -1)) if not rows else ("LINEBELOW", (0, -1), (-1, -1), 0, colors.white),
+    ]))
+    story.append(table)
+    story.append(Spacer(1, 5 * mm))
+    summary = f"Total de registros: {len(rows)} &nbsp;&nbsp;&nbsp; Valor total: <b>{_money(total_value)}</b>"
+    story.append(Paragraph(summary, ParagraphStyle("Summary", parent=styles["Normal"], fontSize=9, leading=12)))
+    generated = datetime.now().strftime("%d/%m/%Y às %H:%M")
+    story.append(Spacer(1, 2 * mm))
+    story.append(Paragraph(f"Relatório gerado em {generated} pelo Sistema Área de Estudos.", subtitle_style))
+    doc.build(story)
+    buffer.seek(0)
+    return send_file(buffer, mimetype="application/pdf", as_attachment=True, download_name=filename)
 
 
-@app.route("/admin/permissao_trabalho/<int:user_id>/<acao>")
-@login_required
-@admin_required
-def permissao_trabalho(user_id, acao):
-    valor = 1 if acao == "liberar" else 0
-    conn = db()
-    cur = conn.cursor()
-    cur.execute("UPDATE usuarios SET pode_trabalho=%s WHERE id=%s AND perfil='lideranca'", (valor, user_id))
-    conn.commit()
-    cur.close()
-    conn.close()
-    flash("Permissão de trabalho atualizada.")
-    return redirect(url_for("admin"))
+def _report_filters(query, model):
+    selected_date = _parse_report_date(request.args.get("date", ""))
+    owner_id = request.args.get("owner_id", type=int)
+    city = request.args.get("city", "").strip()
+    if selected_date:
+        query = query.filter(func.date(model.created_at) == selected_date)
+    if owner_id:
+        query = query.filter(model.owner_id == owner_id)
+    if city:
+        query = query.filter(model.city.ilike(f"%{city}%"))
+    return query, selected_date, owner_id, city
 
 
-@app.route("/admin/editar_espontaneo/<int:item_id>", methods=["GET", "POST"])
-@login_required
-@admin_required
-def editar_espontaneo(item_id):
-    conn = db()
-    cur = conn.cursor()
-
-    if request.method == "POST":
-        nome = request.form.get("nome_completo", "").strip()
-        municipio = request.form.get("municipio", "").strip()
-        telefone = request.form.get("telefone", "").strip()
-        endereco = request.form.get("endereco_completo", "").strip()
-
-        cur.execute("""
-            UPDATE espontaneos
-            SET nome_completo=%s, municipio=%s, telefone=%s, endereco_completo=%s,
-                nome_normalizado=%s, telefone_normalizado=%s
-            WHERE id=%s
-        """, (nome, municipio, telefone, endereco, normalizar(nome), normalizar(telefone), item_id))
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        flash("Cadastro espontâneo editado.")
-        return redirect(url_for("admin"))
-
-    cur.execute("""
-        SELECT e.*, u.nome AS lideranca_nome
-        FROM espontaneos e
-        JOIN usuarios u ON u.id=e.lideranca_id
-        WHERE e.id=%s
-    """, (item_id,))
-    item = cur.fetchone()
-
-    cur.close()
-    conn.close()
-
-    return render_template("editar_espontaneo.html", item=item)
-
-
-@app.route("/admin/editar_trabalho/<int:item_id>", methods=["GET", "POST"])
-@login_required
-@admin_required
-def editar_trabalho(item_id):
-    conn = db()
-    cur = conn.cursor()
-
-    if request.method == "POST":
-        nome = request.form.get("nome", "").strip()
-        municipio = request.form.get("municipio", "").strip()
-        colegio = request.form.get("colegio", "").strip()
-        endereco = request.form.get("endereco", "").strip()
-        telefone = request.form.get("telefone", "").strip()
-        zona = request.form.get("zona", "").strip()
-        secao = request.form.get("secao", "").strip()
-        titulo = request.form.get("numero_titulo", "").strip()
-
-        cur.execute("""
-            UPDATE trabalho
-            SET nome=%s, municipio=%s, colegio=%s, endereco=%s, telefone=%s,
-                zona=%s, secao=%s, numero_titulo=%s,
-                nome_normalizado=%s, telefone_normalizado=%s, titulo_normalizado=%s
-            WHERE id=%s
-        """, (nome, municipio, colegio, endereco, telefone, zona, secao, titulo, normalizar(nome), normalizar(telefone), normalizar(titulo), item_id))
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        flash("Cadastro de trabalho editado.")
-        return redirect(url_for("admin"))
-
-    cur.execute("""
-        SELECT t.*, u.nome AS lideranca_nome
-        FROM trabalho t
-        JOIN usuarios u ON u.id=t.lideranca_id
-        WHERE t.id=%s
-    """, (item_id,))
-    item = cur.fetchone()
-
-    cur.close()
-    conn.close()
-
-    return render_template("editar_trabalho.html", item=item)
-
-
-@app.route("/admin/exportar/<tipo>")
-@login_required
-@admin_required
-def exportar(tipo):
-    conn = db()
-    cur = conn.cursor()
-    output = io.StringIO()
-    writer = csv.writer(output)
-
-    if tipo == "espontaneos":
-        writer.writerow(["Lideranca", "Nome completo", "Municipio", "Telefone", "Endereco completo", "Data"])
-        cur.execute("""
-            SELECT e.*, u.nome AS lideranca_nome
-            FROM espontaneos e
-            JOIN usuarios u ON u.id=e.lideranca_id
-            ORDER BY e.id DESC
-        """)
-        rows = cur.fetchall()
-        for r in rows:
-            writer.writerow([r["lideranca_nome"], r["nome_completo"], r["municipio"], r["telefone"], r["endereco_completo"], r["created_at"]])
-        filename = "espontaneos.csv"
+def _report_subtitle(selected_date, owner_id, city):
+    parts = []
+    parts.append(f"Data: {selected_date.strftime('%d/%m/%Y')}" if selected_date else "Data: todos os dias")
+    if owner_id:
+        owner = db.session.get(User, owner_id)
+        parts.append(f"Responsável: {owner.name if owner else 'Não encontrado'}")
     else:
-        writer.writerow(["Lideranca", "Nome", "Municipio", "Colegio", "Endereco", "Telefone", "Zona", "Secao", "Numero titulo", "Data"])
-        cur.execute("""
-            SELECT t.*, u.nome AS lideranca_nome
-            FROM trabalho t
-            JOIN usuarios u ON u.id=t.lideranca_id
-            ORDER BY t.id DESC
-        """)
-        rows = cur.fetchall()
-        for r in rows:
-            writer.writerow([r["lideranca_nome"], r["nome"], r["municipio"], r["colegio"], r["endereco"], r["telefone"], r["zona"], r["secao"], r["numero_titulo"], r["created_at"]])
-        filename = "trabalho.csv"
+        parts.append("Responsável: todos")
+    parts.append(f"Cidade: {city}" if city else "Cidade: todas")
+    return " | ".join(parts)
 
-    cur.close()
-    conn.close()
 
-    return Response(
-        output.getvalue(),
-        mimetype="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
+@app.get("/admin/reports/day-work.pdf")
+@admin_required
+def report_day_work_pdf():
+    query, selected_date, owner_id, city = _report_filters(
+        DayWork.query.order_by(DayWork.created_at.asc()), DayWork
+    )
+    records = query.all()
+    rows = []
+    for x in records:
+        rows.append([
+            x.created_at.strftime("%d/%m/%Y %H:%M") if x.created_at else "-",
+            x.name,
+            x.voter_title,
+            x.school,
+            f"{x.zone}/{x.section}",
+            x.city,
+            x.owner.name,
+            _money(x.amount),
+            x.notes or "-",
+        ])
+    total_value = sum((x.amount or Decimal("0")) for x in records)
+    date_tag = selected_date.isoformat() if selected_date else "todos"
+    return _pdf_response(
+        "Relatório de Trabalho do Dia",
+        _report_subtitle(selected_date, owner_id, city),
+        ["Cadastro", "Nome", "Título", "Colégio", "Zona/Seção", "Cidade", "Responsável", "Valor", "Observações"],
+        rows,
+        total_value,
+        f"trabalho-do-dia-{date_tag}.pdf",
+        [22*mm, 32*mm, 25*mm, 35*mm, 20*mm, 25*mm, 30*mm, 20*mm, 55*mm],
     )
 
 
-init_db()
+@app.get("/admin/reports/leaders.pdf")
+@admin_required
+def report_leaders_pdf():
+    query, selected_date, owner_id, city = _report_filters(
+        LeaderRecord.query.order_by(LeaderRecord.created_at.asc()), LeaderRecord
+    )
+    records = query.all()
+    rows = []
+    for x in records:
+        rows.append([
+            x.created_at.strftime("%d/%m/%Y %H:%M") if x.created_at else "-",
+            x.name,
+            x.phone,
+            x.city,
+            x.district,
+            x.address,
+            x.owner.name,
+            _money(x.amount),
+            x.notes or "-",
+        ])
+    total_value = sum((x.amount or Decimal("0")) for x in records)
+    date_tag = selected_date.isoformat() if selected_date else "todos"
+    return _pdf_response(
+        "Relatório de Líderes",
+        _report_subtitle(selected_date, owner_id, city),
+        ["Cadastro", "Nome", "Telefone", "Cidade", "Bairro", "Endereço", "Responsável", "Valor", "Observações"],
+        rows,
+        total_value,
+        f"lideres-{date_tag}.pdf",
+        [22*mm, 30*mm, 24*mm, 23*mm, 24*mm, 42*mm, 29*mm, 20*mm, 50*mm],
+    )
+
+
+@app.post("/day-work/create")
+@login_required
+def create_day_work():
+    if current_user.role != "leader":
+        abort(403)
+    try:
+        amount = Decimal(request.form.get("amount", "0"))
+    except InvalidOperation:
+        amount = Decimal("0")
+    photo_file = request.files.get("photo")
+    photo = None
+    photo_type = None
+    if photo_file and photo_file.filename:
+        if not (photo_file.mimetype or "").startswith("image/"):
+            flash("O arquivo precisa ser uma imagem.", "error")
+            return redirect(url_for("dashboard") + "#trabalho")
+        photo = photo_file.read()
+        photo_type = photo_file.mimetype
+
+    record = DayWork(
+        owner_id=current_user.id,
+        name=request.form.get("name", "").strip(),
+        voter_title=request.form.get("voter_title", "").strip(),
+        school=request.form.get("school", "").strip(),
+        zone=request.form.get("zone", "").strip(),
+        section=request.form.get("section", "").strip(),
+        city=request.form.get("city", "").strip(),
+        amount=amount,
+        notes=request.form.get("notes", "").strip() or None,
+        photo=photo,
+        photo_type=photo_type,
+    )
+    db.session.add(record)
+    db.session.commit()
+    flash("Cadastro salvo. Somente o administrador poderá alterar.", "success")
+    return redirect(url_for("dashboard") + "#cadastros")
+
+
+@app.post("/leaders/create")
+@login_required
+def create_leader_record():
+    if current_user.role != "leader":
+        abort(403)
+    try:
+        amount = Decimal(request.form.get("amount", "0"))
+    except InvalidOperation:
+        amount = Decimal("0")
+    record = LeaderRecord(
+        owner_id=current_user.id,
+        name=request.form.get("name", "").strip(),
+        phone=normalize_phone(request.form.get("phone")),
+        city=request.form.get("city", "").strip(),
+        district=request.form.get("district", "").strip(),
+        address=request.form.get("address", "").strip(),
+        amount=amount,
+        notes=request.form.get("notes", "").strip() or None,
+    )
+    db.session.add(record)
+    db.session.commit()
+    flash("Líder salvo. Somente o administrador poderá alterar.", "success")
+    return redirect(url_for("dashboard") + "#cadastros")
+
+
+@app.route("/photo/<int:record_id>")
+@login_required
+def photo(record_id):
+    record = db.session.get(DayWork, record_id)
+    if not record or not record.photo:
+        abort(404)
+    if current_user.role != "admin" and record.owner_id != current_user.id:
+        abort(403)
+    return send_file(BytesIO(record.photo), mimetype=record.photo_type or "image/jpeg")
+
+
+@app.post("/admin/access/<int:user_id>/update")
+@admin_required
+def update_access(user_id):
+    user = db.session.get(User, user_id) or abort(404)
+    username = normalize_username(request.form.get("username"))
+    conflict = User.query.filter(User.id != user.id, or_(User.username == username, User.phone == normalize_phone(request.form.get("phone")))).first()
+    if conflict:
+        flash("Usuário ou telefone já está em uso.", "error")
+        return redirect(url_for("dashboard") + "#acessos")
+    user.name = request.form.get("name", "").strip()
+    user.username = username
+    user.phone = normalize_phone(request.form.get("phone"))
+    user.city = request.form.get("city", "").strip()
+    user.status = request.form.get("status", "pending")
+    password = request.form.get("password", "")
+    if password:
+        user.password_hash = generate_password_hash(password)
+    db.session.commit()
+    audit("User", user.id, "updated")
+    flash("Acesso atualizado.", "success")
+    return redirect(url_for("dashboard") + "#acessos")
+
+
+@app.post("/admin/access/<int:user_id>/delete")
+@admin_required
+def delete_access(user_id):
+    user = db.session.get(User, user_id) or abort(404)
+    if user.day_work_records or user.leader_records:
+        user.status = "blocked"
+        db.session.commit()
+        flash("O acesso foi bloqueado porque possui cadastros vinculados.", "info")
+    else:
+        db.session.delete(user)
+        db.session.commit()
+        flash("Acesso excluído.", "success")
+    audit("User", user_id, "deleted_or_blocked")
+    return redirect(url_for("dashboard") + "#acessos")
+
+
+@app.post("/admin/day-work/<int:record_id>/update")
+@admin_required
+def update_day_work(record_id):
+    record = db.session.get(DayWork, record_id) or abort(404)
+    record.name = request.form.get("name", "").strip()
+    record.voter_title = request.form.get("voter_title", "").strip()
+    record.school = request.form.get("school", "").strip()
+    record.zone = request.form.get("zone", "").strip()
+    record.section = request.form.get("section", "").strip()
+    record.city = request.form.get("city", "").strip()
+    record.amount = Decimal(request.form.get("amount", "0"))
+    record.notes = request.form.get("notes", "").strip() or None
+    photo_file = request.files.get("photo")
+    if photo_file and photo_file.filename:
+        record.photo = photo_file.read()
+        record.photo_type = photo_file.mimetype
+    db.session.commit()
+    audit("DayWork", record.id, "updated")
+    flash("Cadastro atualizado.", "success")
+    return redirect(url_for("dashboard") + "#cadastros")
+
+
+@app.post("/admin/day-work/<int:record_id>/delete")
+@admin_required
+def delete_day_work(record_id):
+    record = db.session.get(DayWork, record_id) or abort(404)
+    db.session.delete(record)
+    db.session.commit()
+    audit("DayWork", record_id, "deleted")
+    flash("Cadastro excluído.", "success")
+    return redirect(url_for("dashboard") + "#cadastros")
+
+
+@app.post("/admin/leader/<int:record_id>/update")
+@admin_required
+def update_leader(record_id):
+    record = db.session.get(LeaderRecord, record_id) or abort(404)
+    record.name = request.form.get("name", "").strip()
+    record.phone = normalize_phone(request.form.get("phone"))
+    record.city = request.form.get("city", "").strip()
+    record.district = request.form.get("district", "").strip()
+    record.address = request.form.get("address", "").strip()
+    record.amount = Decimal(request.form.get("amount", "0"))
+    record.notes = request.form.get("notes", "").strip() or None
+    db.session.commit()
+    audit("LeaderRecord", record.id, "updated")
+    flash("Líder atualizado.", "success")
+    return redirect(url_for("dashboard") + "#lideres-lista")
+
+
+@app.post("/admin/leader/<int:record_id>/delete")
+@admin_required
+def delete_leader(record_id):
+    record = db.session.get(LeaderRecord, record_id) or abort(404)
+    db.session.delete(record)
+    db.session.commit()
+    audit("LeaderRecord", record_id, "deleted")
+    flash("Líder excluído.", "success")
+    return redirect(url_for("dashboard") + "#lideres-lista")
+
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "10000")))
