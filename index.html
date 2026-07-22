@@ -1,1 +1,37 @@
-{% extends "base.html" %}{% block content %}<section class="login-page"><main class="wrap"><section class="brand"><span>Acesso interno</span><h1>Área de Trabalho</h1><p>Ambiente exclusivo para cadastro, organização e acompanhamento das atividades.</p></section><section class="panel"><div class="panel-title"><h2>Painel de Acesso</h2><p>Entre ou solicite seu cadastro.</p></div><div class="tabs"><button type="button" class="tab active" onclick="showTab('login')">Login</button><button type="button" class="tab" onclick="showTab('cadastro')">Cadastro</button></div><form id="login" class="form active" method="post" action="{{ url_for('login') }}"><h3>Entrar</h3><label>Usuário</label><input type="text" name="usuario" required autocomplete="off"><label>Senha</label><input type="password" name="senha" required autocomplete="current-password"><button class="btn fullbtn" type="submit">Entrar</button></form><form id="cadastro" class="form" method="post" action="{{ url_for('cadastro') }}"><h3>Cadastro</h3><p class="muted">O acesso só será liberado após aprovação do administrador.</p><div class="grid2"><div class="full"><label>Nome completo</label><input type="text" name="nome" required autocomplete="off"></div><div><label>Telefone / WhatsApp</label><input type="text" name="telefone" inputmode="numeric" autocomplete="off"></div><div><label>E-mail</label><input type="email" name="email" autocomplete="off"></div><div><label>Município</label><input type="text" name="municipio" autocomplete="off"></div><div><label>Bairro</label><input type="text" name="bairro" autocomplete="off"></div><div><label>Zona / Região</label><input type="text" name="zona_regiao" autocomplete="off"></div><div><label>Usuário</label><input type="text" name="usuario" required autocomplete="off"></div><div class="full"><label>Senha</label><input type="password" name="senha" required autocomplete="new-password"></div></div><button class="btn fullbtn" type="submit">Enviar solicitação</button><div class="note">Seu cadastro ficará pendente até aprovação.</div></form></section></main></section><script>function showTab(id){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));document.querySelectorAll('.form').forEach(f=>f.classList.remove('active'));document.querySelector(`[onclick="showTab('${id}')"]`).classList.add('active');document.getElementById(id).classList.add('active');}</script>{% endblock %}
+:root{--azul:#071c4d;--azul2:#0d2b68;--amarelo:#ffcc18;--fundo:#f4f7fb;--texto:#0b163b;--borda:#d9e3f0;--verde:#16a34a;--vermelho:#dc2626;--laranja:#f59e0b;--escuro:#111827}
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--fundo);color:var(--texto)}
+.login-page{min-height:100vh;background:linear-gradient(135deg,var(--azul),var(--azul2));display:flex;align-items:center;justify-content:center;padding:24px}
+.wrap{width:100%;max-width:1050px;display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.brand{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);border-radius:28px;padding:42px;color:white;display:flex;flex-direction:column;justify-content:center;min-height:520px}
+.brand span{display:inline-block;width:max-content;background:var(--amarelo);color:var(--azul);font-weight:bold;padding:9px 14px;border-radius:999px;margin-bottom:18px}
+.brand h1{font-size:46px;line-height:1.05;margin:0 0 14px}.brand p{font-size:19px;opacity:.92;line-height:1.5}
+.panel,.card{background:white;border:1px solid var(--borda);border-radius:24px;padding:28px;box-shadow:0 8px 25px rgba(10,30,80,.08)}
+.panel-title{text-align:center;margin-bottom:24px}
+.tabs{display:grid;grid-template-columns:1fr 1fr;background:#eef3fa;border-radius:16px;padding:6px;margin-bottom:24px}
+.tab{border:0;padding:14px;border-radius:12px;font-weight:bold;cursor:pointer;color:var(--azul);background:transparent}.tab.active{background:var(--azul);color:white}
+.form{display:none}.form.active{display:block}
+h2,h3{margin:0 0 8px;color:var(--azul)}.muted{color:#5a6682;line-height:1.4}
+label{display:block;font-weight:bold;margin:12px 0 6px;color:#17244a}
+input,select{width:100%;border:1px solid var(--borda);border-radius:12px;padding:13px;font-size:15px;background:#fbfdff}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.full{grid-column:1/-1}
+.btn{border:0;background:var(--azul);color:white;padding:11px 15px;border-radius:12px;font-weight:bold;cursor:pointer;text-decoration:none;display:inline-block}
+.btn.fullbtn{width:100%;margin-top:18px}.btn.yellow{background:var(--amarelo);color:var(--azul)}
+.note{margin-top:16px;background:#fff8d9;border:1px solid #f1d36b;color:#735100;padding:12px;border-radius:12px;font-size:14px}
+.topbar{background:linear-gradient(90deg,var(--azul),var(--azul2));color:white;padding:18px 28px;display:flex;justify-content:space-between;align-items:center}
+.container{max-width:1220px;margin:28px auto;padding:0 18px}
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:18px}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:20px 0}
+.metric,.profile-card{background:white;border:1px solid var(--borda);border-radius:18px;padding:18px}
+.metric strong{display:block;font-size:32px;color:var(--azul)}
+.badge{display:inline-block;padding:7px 11px;border-radius:999px;background:#eef3fa;color:var(--azul);font-weight:bold;font-size:13px;margin-bottom:14px}
+.table-wrap{overflow-x:auto;background:white;border:1px solid var(--borda);border-radius:18px;box-shadow:0 8px 25px rgba(10,30,80,.06);margin:18px 0 28px}
+.table-wrap.no-shadow{box-shadow:none;margin-bottom:0}
+table{width:100%;border-collapse:collapse;min-width:980px}
+th,td{padding:13px;border-bottom:1px solid var(--borda);text-align:left;font-size:14px}th{background:#eef3fa;color:var(--azul)}
+.status,.permitido,.negado{padding:6px 10px;border-radius:999px;font-size:12px;font-weight:bold;display:inline-block}
+.status.ativo,.permitido{background:#dcfce7;color:#166534}.status.pendente{background:#fef3c7;color:#92400e}.status.bloqueado,.negado{background:#fee2e2;color:#991b1b}
+.linkbtn{display:inline-block;background:var(--azul);color:white;text-decoration:none;padding:7px 10px;border-radius:8px;font-size:12px;font-weight:bold;margin:2px}
+.linkbtn.green{background:var(--verde)}.linkbtn.red{background:var(--vermelho)}.linkbtn.orange{background:var(--laranja);color:#111827}.linkbtn.dark{background:var(--escuro)}
+.flash{position:fixed;top:15px;left:50%;transform:translateX(-50%);background:#fff8d9;border:1px solid #f1d36b;color:#735100;padding:10px 16px;border-radius:12px;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,.15)}
+.flash p{margin:0}.export-row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.bloqueado-card{background:#fff7f7}
+@media(max-width:900px){.wrap,.cards,.grid2,.grid3,.metrics{grid-template-columns:1fr}.brand{min-height:auto;padding:30px}.brand h1{font-size:34px}.topbar{flex-direction:column;align-items:flex-start;gap:12px}}
